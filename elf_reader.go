@@ -1506,6 +1506,7 @@ func (ec *elfCode) loadKsymsSection() error {
 		case *btf.Func:
 			ec.kfuncs[t.TypeName()] = t
 		case *btf.Var:
+			fmt.Printf("%v\n", t)
 			ec.ksyms[t.TypeName()] = struct{}{}
 		default:
 			return fmt.Errorf("unexpected variable type in .ksyms: %T", v)
