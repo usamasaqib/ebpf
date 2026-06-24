@@ -263,6 +263,7 @@ func (elf *elfData) fixupDatasec(typ Type) error {
 				case *Func:
 					continue
 				case *Var:
+					fmt.Printf("%v\n", t)
 					if _, ok := t.Type.(*Void); !ok {
 						return fmt.Errorf("data section %s: expected %s to be *Void, not %T: %w", name, vsi.Type.TypeName(), vsi.Type, ErrNotSupported)
 					}
