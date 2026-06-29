@@ -452,15 +452,22 @@ func resolveKconfigReferences(insns asm.Instructions) (_ *Map, err error) {
 	return kconfig, nil
 }
 
-func resolveKsymReferences(insns asm.Instructions) error {
+func resolveKsymReferences(insns asm.Instructions, cache *btf.Cache) (func(), error) {
 	type fixup struct {
 		*asm.Instruction
 		*ksymMeta
 	}
 
 	var symbols map[string]uint64
-	var fixups []fixup
+	var untypedFixups []fixup
+	var typedFixups []fixup
 
+	keepAlive := make(map[string]*btf.Handle)
+	cleanup := func() {
+		for _, h := range keepAlive {
+			h.Close()
+		}
+	}
 	iter := insns.Iterate()
 	for iter.Next() {
 		ins := iter.Ins
@@ -473,25 +480,31 @@ func resolveKsymReferences(insns asm.Instructions) error {
 			symbols = make(map[string]uint64)
 		}
 
-		symbols[meta.Name] = 0
-		fixups = append(fixups, fixup{
-			iter.Ins, meta,
-		})
+		// for typed ksyms the verifier will fill in the address
+		t := meta.BtfVar
+		if _, ok := t.Type.(*btf.Void); ok {
+			symbols[meta.Name] = 0
+			untypedFixups = append(untypedFixups, fixup{
+				iter.Ins, meta,
+			})
+		} else {
+			typedFixups = append(typedFixups, fixup{
+				iter.Ins, meta,
+			})
+		}
 	}
 
-	if len(symbols) == 0 {
-		return nil
-	}
-
-	err := kallsyms.AssignAddresses(symbols)
-	// Tolerate ErrRestrictedKernel during initial lookup, user may have all weak
-	// ksyms and a fallback path.
-	if err != nil && !errors.Is(err, ErrRestrictedKernel) {
-		return fmt.Errorf("resolve ksyms: %w", err)
+	if len(symbols) != 0 {
+		err := kallsyms.AssignAddresses(symbols)
+		// Tolerate ErrRestrictedKernel during initial lookup, user may have all weak
+		// ksyms and a fallback path.
+		if err != nil && !errors.Is(err, ErrRestrictedKernel) {
+			return cleanup, fmt.Errorf("resolve ksyms: %w", err)
+		}
 	}
 
 	var missing []string
-	for _, fixup := range fixups {
+	for _, fixup := range untypedFixups {
 		addr := symbols[fixup.Name]
 		// A weak ksym variable in eBPF C means its resolution is optional.
 		if addr == 0 && fixup.Binding != elf.STB_WEAK {
@@ -505,13 +518,71 @@ func resolveKsymReferences(insns asm.Instructions) error {
 	}
 
 	if len(missing) > 0 {
+		err := kallsyms.AssignAddresses(symbols)
 		if err != nil {
 			// Program contains required ksyms, return the error from above.
-			return fmt.Errorf("resolve required ksyms: %s: %w", strings.Join(missing, ","), err)
+			return cleanup, fmt.Errorf("resolve required ksyms: %s: %w", strings.Join(missing, ","), err)
 		}
 
-		return fmt.Errorf("kernel is missing symbol: %s", strings.Join(missing, ","))
+		return cleanup, fmt.Errorf("kernel is missing symbol: %s", strings.Join(missing, ","))
 	}
 
-	return nil
+	btfSpec, err := cache.Kernel()
+	if err != nil {
+		return cleanup, fmt.Errorf("failed to get the btf Spec from the cache: %w", err)
+	}
+
+	modules, err := cache.Modules()
+	if err != nil {
+		return cleanup, fmt.Errorf("unable to get list of all loaded modules in btf cache: %w", err)
+	}
+
+	for _, fixup := range typedFixups {
+		var kernelVar *btf.Var
+
+		foundSpec := btfSpec
+		foundMod := "vmlinux"
+		btfVar := fixup.ksymMeta.BtfVar
+		if err := btfSpec.TypeByName(btfVar.Name, &kernelVar); err != nil {
+			for _, mname := range modules {
+				modSpec, err := cache.Module(mname)
+				if err != nil {
+					continue
+				}
+				if err := modSpec.TypeByName(btfVar.Name, &kernelVar); err == nil {
+					foundSpec, foundMod = modSpec, mname
+					break
+				}
+			}
+		}
+		if kernelVar == nil {
+			return cleanup, fmt.Errorf("unable to find btf type for variable %s in vmlinux and %d loaded modules", btfVar.Name, len(modules))
+		}
+
+		typeId, err := foundSpec.TypeID(kernelVar)
+		if err != nil {
+			return cleanup, fmt.Errorf("unable to find type id for variable %s in the kernel btf: %w", btfVar.Name, err)
+		}
+
+		btfObjFD := int64(0)
+		if foundMod != "vmlinux" {
+			btfHandle, ok := keepAlive[foundMod]
+			if !ok {
+				btfHandle, err = btf.FindHandle(func(i *btf.HandleInfo) bool {
+					return i.IsModule() && i.Name == foundMod
+				})
+				if err != nil {
+					return cleanup, fmt.Errorf("unable to get btf handle for module %s: %w", foundMod, err)
+				}
+
+				keepAlive[foundMod] = btfHandle
+			}
+			btfObjFD = int64(btfHandle.FD())
+		}
+
+		fixup.Instruction.Src = asm.PseudoBtfId
+		fixup.Instruction.Constant = int64(uint32(typeId)) | (btfObjFD << 32)
+	}
+
+	return cleanup, nil
 }

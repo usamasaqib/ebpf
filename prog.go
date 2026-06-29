@@ -380,9 +380,11 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions, c *btf.Cache)
 	}
 	defer kconfig.Close()
 
-	if err := resolveKsymReferences(insns); err != nil {
+	cleanup, err := resolveKsymReferences(insns, c)
+	if err != nil {
 		return nil, fmt.Errorf("resolve .ksyms: %w", err)
 	}
+	defer cleanup()
 
 	if err := fixupAndValidate(insns); err != nil {
 		return nil, err

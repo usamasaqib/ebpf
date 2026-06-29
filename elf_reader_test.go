@@ -653,13 +653,13 @@ func TestKconfig(t *testing.T) {
 	qt.Assert(t, qt.Equals(ret, 0), qt.Commentf("Failed assertion at line %d in testdata/kconfig.c", ret))
 }
 
-func TestKsym(t *testing.T) {
+func TestUntypedKsym(t *testing.T) {
 	file := testutils.NativeFile(t, "testdata/ksym-%s.elf")
 	spec, err := LoadCollectionSpec(file)
 	qt.Assert(t, qt.IsNil(err))
 
 	var obj struct {
-		Main     *Program `ebpf:"ksym_test"`
+		Main     *Program `ebpf:"untyped_ksym_test"`
 		ArrayMap *Map     `ebpf:"array_map"`
 	}
 
@@ -688,13 +688,13 @@ func TestKsym(t *testing.T) {
 	qt.Assert(t, qt.Equals(value, ksyms["bpf_trace_run1"]))
 }
 
-func TestKsymWeakMissing(t *testing.T) {
+func TestUntypedKsymWeakMissing(t *testing.T) {
 	file := testutils.NativeFile(t, "testdata/ksym-%s.elf")
 	spec, err := LoadCollectionSpec(file)
 	qt.Assert(t, qt.IsNil(err))
 
 	var obj struct {
-		Main *Program `ebpf:"ksym_missing_test"`
+		Main *Program `ebpf:"untyped_ksym_missing_test"`
 	}
 
 	err = spec.LoadAndAssign(&obj, nil)
@@ -704,6 +704,50 @@ func TestKsymWeakMissing(t *testing.T) {
 
 	ret := mustRun(t, obj.Main, nil)
 	qt.Assert(t, qt.Equals(ret, 1))
+}
+
+func TestTypedKsym(t *testing.T) {
+	file := testutils.NativeFile(t, "testdata/ksym-%s.elf")
+	spec, err := LoadCollectionSpec(file)
+	qt.Assert(t, qt.IsNil(err))
+
+	var obj struct {
+		Main     *Program `ebpf:"typed_ksym_test"`
+		ArrayMap *Map     `ebpf:"array_map"`
+	}
+
+	err = spec.LoadAndAssign(&obj, nil)
+	testutils.SkipIfNotSupported(t, err)
+	qt.Assert(t, qt.IsNil(err))
+	defer obj.Main.Close()
+	defer obj.ArrayMap.Close()
+
+	mustRun(t, obj.Main, nil)
+
+	ksyms := map[string]uint64{
+		"bpf_prog_active": 0,
+	}
+
+	qt.Assert(t, qt.IsNil(kallsyms.AssignAddresses(ksyms)))
+	qt.Assert(t, qt.Not(qt.Equals(ksyms["bpf_prog_active"], 0)))
+
+	var value uint64
+	qt.Assert(t, qt.IsNil(obj.ArrayMap.Lookup(uint32(0), &value)))
+	qt.Assert(t, qt.Equals(value, ksyms["bpf_prog_active"]))
+}
+
+func TestTypedKsymWeakMissing(t *testing.T) {
+	file := testutils.NativeFile(t, "testdata/ksym-%s.elf")
+	spec, err := LoadCollectionSpec(file)
+	qt.Assert(t, qt.IsNil(err))
+
+	var obj struct {
+		Main *Program `ebpf:"typed_ksym_missing_test"`
+	}
+
+	err = spec.LoadAndAssign(&obj, nil)
+	testutils.SkipIfNotSupported(t, err)
+	qt.Assert(t, qt.IsNotNil(err))
 }
 
 func TestKfunc(t *testing.T) {
