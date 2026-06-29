@@ -707,6 +707,9 @@ func TestUntypedKsymWeakMissing(t *testing.T) {
 }
 
 func TestTypedKsym(t *testing.T) {
+	// typed ksym support introduced in 5.10 by 4976b718c3551faba2c0616ef55ebeb74db1c5ca
+	testutils.SkipOnOldKernel(t, "5.10", "typed ksym support")
+
 	file := testutils.NativeFile(t, "testdata/ksym-%s.elf")
 	spec, err := LoadCollectionSpec(file)
 	qt.Assert(t, qt.IsNil(err))
@@ -737,6 +740,8 @@ func TestTypedKsym(t *testing.T) {
 }
 
 func TestTypedKsymWeakMissing(t *testing.T) {
+	testutils.SkipOnOldKernel(t, "5.10", "typed ksym support")
+
 	file := testutils.NativeFile(t, "testdata/ksym-%s.elf")
 	spec, err := LoadCollectionSpec(file)
 	qt.Assert(t, qt.IsNil(err))
