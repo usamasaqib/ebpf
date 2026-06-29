@@ -482,12 +482,14 @@ func resolveKsymReferences(insns asm.Instructions, cache *btf.Cache) (func(), er
 
 		// for typed ksyms the verifier will fill in the address
 		t := meta.BtfVar
-		if _, ok := t.Type.(*btf.Void); ok {
+
+		switch btf.UnderlyingType(t.Type).(type) {
+		case *btf.Void:
 			symbols[meta.Name] = 0
 			untypedFixups = append(untypedFixups, fixup{
 				iter.Ins, meta,
 			})
-		} else {
+		default:
 			typedFixups = append(typedFixups, fixup{
 				iter.Ins, meta,
 			})
