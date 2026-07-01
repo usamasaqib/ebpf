@@ -38,7 +38,12 @@ __section("socket") int untyped_ksym_missing_test() {
 	return 0;
 }
 
+struct softnet_data__local {
+    unsigned int processed;
+} __attribute__((preserve_access_index));
+
 extern const int bpf_prog_active __ksym __weak;
+extern const struct softnet_data__local softnet_data __ksym __weak;
 
 __section("socket") int typed_ksym_test() {
 	uint32_t i;
@@ -47,6 +52,10 @@ __section("socket") int typed_ksym_test() {
 	i   = 0;
 	val = (uint64_t)&bpf_prog_active;
 	bpf_map_update_elem(&array_map, &i, &val, 0);
+
+    i = 1;
+    val = (uint64_t)&softnet_data;
+    bpf_map_update_elem(&array_map, &i, &val, 0);
 
 	return 0;
 }

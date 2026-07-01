@@ -729,14 +729,19 @@ func TestTypedKsym(t *testing.T) {
 
 	ksyms := map[string]uint64{
 		"bpf_prog_active": 0,
+		"softnet_data":    0,
 	}
 
 	qt.Assert(t, qt.IsNil(kallsyms.AssignAddresses(ksyms)))
 	qt.Assert(t, qt.Not(qt.Equals(ksyms["bpf_prog_active"], 0)))
+	qt.Assert(t, qt.Not(qt.Equals(ksyms["softnet_data"], 0)))
 
 	var value uint64
 	qt.Assert(t, qt.IsNil(obj.ArrayMap.Lookup(uint32(0), &value)))
 	qt.Assert(t, qt.Equals(value, ksyms["bpf_prog_active"]))
+
+	qt.Assert(t, qt.IsNil(obj.ArrayMap.Lookup(uint32(1), &value)))
+	qt.Assert(t, qt.Equals(value, ksyms["softnet_data"]))
 }
 
 func TestTypedKsymWeakMissing(t *testing.T) {
